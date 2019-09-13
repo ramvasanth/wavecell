@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"time"
 )
@@ -54,7 +55,7 @@ func (c Client) defaultRequest(b []byte, path string) (r Response, err error) {
 		return
 	}
 	if c.AuthKey != "" {
-		req.Header.Add("Authorization", "App "+c.AuthKey)
+		req.Header.Add("Authorization", "Bearer "+c.AuthKey)
 	}
 
 	req.Header.Add("Content-Type", "application/json")
@@ -67,6 +68,7 @@ func (c Client) defaultRequest(b []byte, path string) (r Response, err error) {
 		err = json.NewDecoder(resp.Body).Decode(&r)
 		return
 	}
-	err = fmt.Errorf("received status code: %d, for more information on this error refer to this link:https://developer.wavecell.com/v1/sms-api/api-send-sms", resp.StatusCode)
+	bEr, _ := ioutil.ReadAll(resp.Body)
+	err = fmt.Errorf("received status code: %d, error: %s,for more information on this error refer to this link:https://developer.wavecell.com/v1/sms-api/api-send-sms", resp.StatusCode, bEr)
 	return
 }
