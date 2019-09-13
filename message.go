@@ -8,6 +8,7 @@ type Message struct {
 	To              string `json:"destination"`
 	Text            string `json:"text"`
 	ClientMessageID string `json:"clientMessageId"`
+	Encoding        string `json:"encoding"`
 }
 
 // Validate validates the body request values

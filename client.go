@@ -10,7 +10,7 @@ import (
 
 const (
 	//SingleMessagePath for sending a single message
-	SingleMessagePath = "sms/1/"
+	SingleMessagePath = "sms/v1/"
 )
 
 // HTTPInterface helps wavecell tests
