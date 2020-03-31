@@ -9,6 +9,7 @@ type Message struct {
 	Text            string `json:"text"`
 	ClientMessageID string `json:"clientMessageId"`
 	Encoding        string `json:"encoding"`
+	DlrCallbackUrl  string `json:"dlrCallbackUrl"`
 }
 
 // Validate validates the body request values
