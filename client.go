@@ -11,7 +11,8 @@ import (
 
 const (
 	//SingleMessagePath for sending a single message
-	SingleMessagePath = "sms/v1/"
+	SINGLE_SMS_ENDPOINT = "sms/v1/%s/single"
+	CONNECTION_TIME_OUT = 15
 )
 
 // HTTPInterface helps wavecell tests
@@ -20,24 +21,26 @@ type HTTPInterface interface {
 }
 
 // Client manages requests to wavecell
-type Client struct {
+type Config struct {
 	BaseURL    string
 	AuthKey    string
 	ClientID   string
+}
+
+type Sender struct{
+	Config Config
 	HTTPClient HTTPInterface
 }
 
-func ClientWithAuthKey(key, clientID string) *Client {
-	return &Client{
-		BaseURL:    "https://api.wavecell.com/",
-		ClientID:   clientID,
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
-		AuthKey:    key,
+func New(config Config) *Sender {
+	return &Sender{
+		Config: config,
+		HTTPClient: &http.Client{Timeout: CONNECTION_TIME_OUT * time.Second},
 	}
 }
 
 // SingleMessage sends one message to one recipient
-func (c Client) SingleMessage(m Message) (r Response, err error) {
+func (s *Sender) SingleMessage(m Message) (r Response, err error) {
 	if err = m.Validate(); err != nil {
 		return
 	}
@@ -45,21 +48,22 @@ func (c Client) SingleMessage(m Message) (r Response, err error) {
 	if err != nil {
 		return
 	}
-	r, err = c.defaultRequest(b, SingleMessagePath+c.ClientID+"/single")
+	path := fmt.Sprintf(SINGLE_SMS_ENDPOINT, s.Config.ClientID)
+	r, err = s.defaultRequest(b, path)
 	return
 }
 
-func (c Client) defaultRequest(b []byte, path string) (r Response, err error) {
-	req, err := http.NewRequest(http.MethodPost, c.BaseURL+path, bytes.NewBuffer(b))
+func (s *Sender) defaultRequest(b []byte, path string) (r Response, err error) {
+	req, err := http.NewRequest(http.MethodPost, s.Config.BaseURL+path, bytes.NewBuffer(b))
 	if err != nil {
 		return
 	}
-	if c.AuthKey != "" {
-		req.Header.Add("Authorization", "Bearer "+c.AuthKey)
+	if s.Config.AuthKey != "" {
+		req.Header.Add("Authorization", "Bearer "+s.Config.AuthKey)
 	}
 
 	req.Header.Add("Content-Type", "application/json")
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
 		return
 	}
