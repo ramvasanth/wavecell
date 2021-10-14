@@ -8,6 +8,12 @@ import (
 	"testing"
 )
 
+var config = Config{
+	BaseURL:  "https://api.wavecell.com/",
+	ClientID: "client_id",
+	AuthKey:  "key",
+}
+
 type HTTPClientMock struct {
 	Response *http.Response
 }
@@ -73,7 +79,7 @@ func TestForResponseMessages(t *testing.T) {
 		Text: "Foo bar",
 	}
 
-	client := ClientWithAuthKey("foo", "bar")
+	client := New(config)
 	for _, test := range tests {
 		test := test
 		t.Run(test.reference, func(t *testing.T) {
@@ -107,7 +113,7 @@ func TestForSingleMessageError(t *testing.T) {
 		},
 	}
 
-	client := ClientWithAuthKey("key", "cliend_id")
+	client := New(config)
 	client.HTTPClient = &HTTPClientMock{
 		Response: &http.Response{
 			Body: ioutil.NopCloser(nil),
