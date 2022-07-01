@@ -4,75 +4,132 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"github.com/fairyhunter13/iso8601/v2"
+	"github.com/fairyhunter13/pool"
+	"github.com/gofiber/fiber/v2"
 	"net/http"
-	"time"
 )
 
-const (
-	//SingleMessagePath for sending a single message
-	SINGLE_SMS_ENDPOINT = "sms/v1/%s/single"
-	CONNECTION_TIME_OUT = 15
-)
-
-// HTTPInterface helps wavecell tests
-type HTTPInterface interface {
-	Do(req *http.Request) (*http.Response, error)
+// Client is the contract for the Wavecell client.
+type Client interface {
+	// SendSMSV1 sends one message to one recipient.
+	// The resp here can be either *ResponseError, *ResponseSendSMS, or nil.
+	// This method is based on the documentation at: https://developer.8x8.com/connect/reference/send-sms-single.
+	SendSMSV1(req *RequestSendSMS) (resp *ResponseSendSMS, err error)
 }
 
-// Client manages requests to wavecell
-type Config struct {
-	BaseURL    string
-	AuthKey    string
-	ClientID   string
+type client struct {
+	opt *Option
 }
 
-type Sender struct{
-	Config Config
-	HTTPClient HTTPInterface
-}
-
-func New(config Config) *Sender {
-	return &Sender{
-		Config: config,
-		HTTPClient: &http.Client{Timeout: CONNECTION_TIME_OUT * time.Second},
-	}
-}
-
-// SingleMessage sends one message to one recipient
-func (s *Sender) SingleMessage(m Message) (r Response, err error) {
-	if err = m.Validate(); err != nil {
-		return
-	}
-	b, err := json.Marshal(m)
+// New returns a new Sender struct.
+func New(opts ...FnOption) (c Client, err error) {
+	o := new(Option).Assign(opts...).Default()
+	err = o.Validate()
 	if err != nil {
 		return
 	}
-	path := fmt.Sprintf(SINGLE_SMS_ENDPOINT, s.Config.ClientID)
-	r, err = s.defaultRequest(b, path)
+
+	c = &client{opt: o.Clone()}
 	return
 }
 
-func (s *Sender) defaultRequest(b []byte, path string) (r Response, err error) {
-	req, err := http.NewRequest(http.MethodPost, s.Config.BaseURL+path, bytes.NewBuffer(b))
+// ResponseSendSMS is the response struct for SendSMSV1.
+type ResponseSendSMS struct {
+	UmID            string                `json:"umid"`
+	Destination     string                `json:"destination"`
+	Status          ResponseSendSMSStatus `json:"status"`
+	Encoding        string                `json:"encoding"`
+	ClientMessageID string                `json:"clientMessageId,omitempty"`
+}
+
+// ResponseSendSMSStatus is the response struct for SendSMSV1.
+type ResponseSendSMSStatus struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+}
+
+// RequestSendSMS is the request struct for SendSMSV1.
+type RequestSendSMS struct {
+	Destination     string        `json:"destination,omitempty" validate:"required"`
+	Country         string        `json:"country,omitempty"`
+	Source          string        `json:"source,omitempty"`
+	ClientMessageID string        `json:"clientMessageId,omitempty"`
+	Text            string        `json:"text,omitempty" validate:"required"`
+	Encoding        string        `json:"encoding,omitempty"`
+	Scheduled       *iso8601.Time `json:"scheduled,omitempty"`
+	Expiry          *iso8601.Time `json:"expiry,omitempty"`
+	DlrCallbackURL  string        `json:"dlrCallbackUrl,omitempty"`
+	ClientIP        string        `json:"clientIp,omitempty"`
+	Track           string        `json:"track,omitempty"`
+}
+
+func (s *client) getReqBuffer(req interface{}) (buf *bytes.Buffer, err error) {
+	buf = pool.GetBuffer()
+	err = json.NewEncoder(buf).Encode(req)
+	return
+}
+
+func (s *client) clean(buff *bytes.Buffer) {
+	pool.Put(buff)
+}
+
+func (s *client) getFullURL(action string) string {
+	return s.opt.BaseURL + action
+}
+
+// SendSMSV1 sends one message to one recipient.
+// The resp here can be either *ResponseError, *ResponseSendSMS, or nil.
+func (s *client) SendSMSV1(req *RequestSendSMS) (resp *ResponseSendSMS, err error) {
+	buff, err := s.getReqBuffer(req)
 	if err != nil {
 		return
 	}
-	if s.Config.AuthKey != "" {
-		req.Header.Add("Authorization", "Bearer "+s.Config.AuthKey)
+	defer s.clean(buff)
+
+	endpoint := fmt.Sprintf(URLSendSMS, s.opt.SubAccountID)
+	r, err := http.NewRequest(http.MethodPost, s.getFullURL(endpoint), buff)
+	if err != nil {
+		return
 	}
 
-	req.Header.Add("Content-Type", "application/json")
-	resp, err := s.HTTPClient.Do(req)
+	res, err := s.doRequest(r)
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 200 {
-		err = json.NewDecoder(resp.Body).Decode(&r)
+	defer func() {
+		if res.Body != nil {
+			_ = res.Body.Close()
+		}
+	}()
+
+	decoder := json.NewDecoder(res.Body)
+	if s.isResponseError(res) {
+		var respErr ResponseError
+		err = decoder.Decode(&respErr)
+		if err != nil {
+			return
+		}
+
+		err = &respErr
 		return
 	}
-	bEr, _ := ioutil.ReadAll(resp.Body)
-	err = fmt.Errorf("received status code: %d, error: %s,for more information on this error refer to this link:https://developer.wavecell.com/v1/sms-api/api-send-sms", resp.StatusCode, bEr)
+
+	err = decoder.Decode(&resp)
+	return
+}
+
+func (s *client) isResponseError(resp *http.Response) bool {
+	return resp.StatusCode >= http.StatusBadRequest
+}
+
+func (s *client) doRequest(req *http.Request) (resp *http.Response, err error) {
+	if s.opt.APIKey != "" {
+		req.Header.Add(fiber.HeaderAuthorization, HeaderAuthBearerValue+s.opt.APIKey)
+	}
+	req.Header.Add(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+	req.Header.Add(fiber.HeaderAccept, fiber.MIMEApplicationJSON)
+
+	resp, err = s.opt.client.Do(req)
 	return
 }

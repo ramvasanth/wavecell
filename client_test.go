@@ -1,130 +1,308 @@
 package wavecell
 
 import (
-	"bytes"
-	"io/ioutil"
+	"fmt"
+	"github.com/fairyhunter13/iso8601/v2"
+	"github.com/gojek/heimdall/v7/hystrix"
+	"github.com/jarcoal/httpmock"
+	"github.com/stretchr/testify/assert"
 	"net/http"
-	"reflect"
 	"testing"
+	"time"
 )
 
-var config = Config{
-	BaseURL:  "https://api.wavecell.com/",
-	ClientID: "client_id",
-	AuthKey:  "key",
-}
-
-type HTTPClientMock struct {
-	Response *http.Response
-}
-
-func (c *HTTPClientMock) Do(req *http.Request) (*http.Response, error) {
-	c.Response.StatusCode = 200
-	return c.Response, nil
-}
-
-func TestForResponseMessages(t *testing.T) {
+func TestNew(t *testing.T) {
+	type args struct {
+		opts []FnOption
+	}
 	tests := []struct {
-		reference string
-		body      string
-		data      Response
+		name          string
+		args          func() args
+		wantNilClient bool
+		wantErr       bool
 	}{
 		{
-			reference: "#1",
-			body:      `{}`,
-			data:      Response{},
-		},
-		{
-			reference: "#2",
-			body:      `{"messages": []}`,
-			data:      Response{},
-		},
-		{
-			reference: "#3",
-			body:      `{"destination": "41793026727"}`,
-			data: Response{
-				Destination: "41793026727",
+			name: "API Key is Empty",
+			args: func() args {
+				return args{
+					opts: []FnOption{
+						WithAPIKey(""),
+					},
+				}
 			},
+			wantNilClient: true,
+			wantErr:       true,
 		},
 		{
-			reference: "#4",
-			body:      `{"destination": "41793026727"}`,
-			data: Response{
-				Destination: "41793026727",
+			name: "Empty Sub Account ID",
+			args: func() args {
+				return args{
+					opts: []FnOption{
+						WithSubAccountID(""),
+						WithBaseURL("https://sms.8x8.com"),
+						WithAPIKey("123456789"),
+						WithSubAccountID(""),
+						WithTimeout(time.Second * 30),
+						WithClient(http.DefaultClient),
+					},
+				}
 			},
+			wantNilClient: true,
+			wantErr:       true,
 		},
 		{
-			reference: "#5",
-			body: `{"umid": "bda3d56d-1424-e711-813c-06ed3428fe67", "clientMessageId": "1234", "destination": "41793026727", "encoding": "GSM7",
-			"status": {
-			"code": "QUEUED",
-			"description": "SMS is accepted and queued for processing"
-			} }`,
-			data: Response{
-				Destination:     "41793026727",
-				ClientMessageID: "1234",
-				UMID:            "bda3d56d-1424-e711-813c-06ed3428fe67",
-				Encoding:        "GSM7",
-				Status: struct {
-					Code        string `json:"code"`
-					Description string `json:"description"`
-				}{"QUEUED", "SMS is accepted and queued for processing"},
+			name: "Empty Base URL",
+			args: func() args {
+				return args{
+					opts: []FnOption{
+						WithAPIKey("123456789"),
+						WithSubAccountID("123456789"),
+						WithTimeout(time.Second * 10),
+						WithClient(http.DefaultClient),
+					},
+				}
 			},
+			wantNilClient: false,
+			wantErr:       false,
+		},
+		{
+			name: "Timeout Less Than 30 Seconds",
+			args: func() args {
+				return args{
+					opts: []FnOption{
+						WithBaseURL("https://sms.8x8.com"),
+						WithAPIKey("123456789"),
+						WithSubAccountID("123456789"),
+						WithTimeout(time.Second * 10),
+						WithClient(http.DefaultClient),
+					},
+				}
+			},
+			wantNilClient: false,
+			wantErr:       false,
+		},
+		{
+			name: "Nil HTTP Client",
+			args: func() args {
+				return args{
+					opts: []FnOption{
+						WithBaseURL("https://sms.8x8.com"),
+						WithAPIKey("123456789"),
+						WithSubAccountID("123456789"),
+						WithTimeout(time.Second * 30),
+						WithClient(nil),
+					},
+				}
+			},
+			wantNilClient: false,
+			wantErr:       false,
+		},
+		{
+			name: "Success Initializing Client",
+			args: func() args {
+				return args{
+					opts: []FnOption{
+						WithBaseURL("https://sms.8x8.com"),
+						WithAPIKey("123456789"),
+						WithSubAccountID("123456789"),
+						WithTimeout(time.Second * 30),
+						WithClient(http.DefaultClient),
+						WithHystrixOptions(
+							hystrix.WithHystrixTimeout(time.Second * 30),
+						),
+					},
+				}
+			},
+			wantNilClient: false,
+			wantErr:       false,
 		},
 	}
-
-	var message = Message{
-		From: "company",
-		To:   "442071838750",
-		Text: "Foo bar",
-	}
-
-	client := New(config)
-	for _, test := range tests {
-		test := test
-		t.Run(test.reference, func(t *testing.T) {
-			client.HTTPClient = &HTTPClientMock{
-				Response: &http.Response{
-					Body:       ioutil.NopCloser(bytes.NewBufferString(test.body)),
-					StatusCode: 200,
-				},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := tt.args()
+			gotC, err := New(args.opts...)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("New() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-			r, err := client.SingleMessage(message)
-			if err != nil {
-				t.Errorf("Error: unexpected error was returned (%s)", err)
-			}
-			if !reflect.DeepEqual(r, test.data) {
-				t.Errorf("expected '%v', got '%v'", test.data, r)
+
+			if tt.wantNilClient {
+				assert.Nil(t, gotC)
 			}
 		})
 	}
 }
 
-func TestForSingleMessageError(t *testing.T) {
+func Test_client_SendSMSV1(t *testing.T) {
+	timeCollections := []iso8601.Time{
+		{time.Now().UTC()},
+	}
+	type fields struct {
+		opt *Option
+	}
+	type args struct {
+		req *RequestSendSMS
+	}
 	tests := []struct {
-		reference string
-		message   Message
-		err       error
+		name      string
+		fields    func() fields
+		args      func() args
+		wantResp  func() *ResponseSendSMS
+		wantErr   bool
+		responder func()
 	}{
 		{
-			reference: "#1",
-			message:   Message{},
-			err:       ErrForFromNonAlphanumeric,
+			name: "Invalid URL",
+			fields: func() fields {
+				return fields{
+					opt: (new(Option)).Assign(
+						WithBaseURL("://sms.8x8.com"),
+						WithSubAccountID("test"),
+						WithAPIKey("test"),
+					).Default(),
+				}
+			},
+			args: func() args {
+				req := RequestSendSMS{
+					Destination: "+6281212121212",
+					Text:        "Test Message",
+				}
+				return args{req: &req}
+			},
+			wantResp: func() *ResponseSendSMS {
+				return nil
+			},
+			wantErr: true,
+		},
+		{
+			name: "Server Unreached",
+			fields: func() fields {
+				return fields{
+					opt: (new(Option)).Assign(
+						WithBaseURL("http://test.local"),
+						WithSubAccountID("test"),
+						WithAPIKey("test"),
+					).Default(),
+				}
+			},
+			args: func() args {
+				req := RequestSendSMS{
+					Destination: "+6281212121212",
+					Text:        "Test Message",
+				}
+				return args{req: &req}
+			},
+			wantResp: func() *ResponseSendSMS {
+				return nil
+			},
+			wantErr: true,
+			responder: func() {
+			},
+		},
+		{
+			name: "Error Response from Server - Invalid Number",
+			fields: func() fields {
+				return fields{
+					opt: (new(Option)).Assign(
+						WithBaseURL("http://sms.8x8.com"),
+						WithSubAccountID("test"),
+						WithAPIKey("test"),
+					).Default(),
+				}
+			},
+			args: func() args {
+				req := RequestSendSMS{
+					Destination: "+62851xxx1121",
+					Text:        "Test Message",
+				}
+				return args{req: &req}
+			},
+			wantResp: func() *ResponseSendSMS {
+				return nil
+			},
+			wantErr: true,
+			responder: func() {
+				httpmock.RegisterResponder(
+					http.MethodPost,
+					"http://sms.8x8.com"+fmt.Sprintf(URLSendSMS, "test"),
+					httpmock.NewJsonResponderOrPanic(http.StatusBadRequest, &ResponseError{
+						Code:      1002,
+						Message:   "Invalid MSISDN format (not E.164 international number)",
+						ErrorID:   "b4478860-b76c-e811-814e-022a35cc1c71",
+						Timestamp: timeCollections[0],
+					}),
+				)
+			},
+		},
+		{
+			name: "Success Response from Server",
+			fields: func() fields {
+				return fields{
+					opt: (new(Option)).Assign(
+						WithBaseURL("http://sms.8x8.com"),
+						WithSubAccountID("test"),
+						WithAPIKey("test"),
+					).Default(),
+				}
+			},
+			args: func() args {
+				req := RequestSendSMS{
+					Destination: "+628511011121",
+					Text:        "Test Message",
+				}
+				return args{req: &req}
+			},
+			wantResp: func() *ResponseSendSMS {
+				return &ResponseSendSMS{
+					UmID:            "bda3d56d-1424-e711-813c-06ed3428fe67",
+					ClientMessageID: "client-message-id",
+					Destination:     "+628511011121",
+					Encoding:        "GSM7",
+					Status: ResponseSendSMSStatus{
+						Code:        "QUEUED",
+						Description: "SMS is accepted and queued for processing",
+					},
+				}
+			},
+			wantErr: false,
+			responder: func() {
+				httpmock.RegisterResponder(
+					http.MethodPost,
+					"http://sms.8x8.com"+fmt.Sprintf(URLSendSMS, "test"),
+					httpmock.NewJsonResponderOrPanic(http.StatusOK, &ResponseSendSMS{
+						UmID:            "bda3d56d-1424-e711-813c-06ed3428fe67",
+						ClientMessageID: "client-message-id",
+						Destination:     "+628511011121",
+						Encoding:        "GSM7",
+						Status: ResponseSendSMSStatus{
+							Code:        "QUEUED",
+							Description: "SMS is accepted and queued for processing",
+						},
+					}),
+				)
+			},
 		},
 	}
-
-	client := New(config)
-	client.HTTPClient = &HTTPClientMock{
-		Response: &http.Response{
-			Body: ioutil.NopCloser(nil),
-		},
-	}
-	for _, test := range tests {
-		test := test
-		t.Run(test.reference, func(t *testing.T) {
-			if _, err := client.SingleMessage(test.message); err != test.err {
-				t.Errorf("expected '%v', got '%v'", test.err, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			httpmock.Activate()
+			defer httpmock.DeactivateAndReset()
+			if tt.responder != nil {
+				tt.responder()
 			}
+
+			fields := tt.fields()
+			args := tt.args()
+			wantResp := tt.wantResp()
+			s := &client{
+				opt: fields.opt,
+			}
+			gotResp, err := s.SendSMSV1(args.req)
+			if tt.wantErr {
+				assert.NotNil(t, err)
+			}
+
+			assert.EqualValuesf(t, wantResp, gotResp, "SendSMSV1(%v)", args.req)
 		})
 	}
 }
