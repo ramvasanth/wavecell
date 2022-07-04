@@ -1,6 +1,7 @@
 package wavecell
 
 import (
+	"context"
 	"fmt"
 	"github.com/fairyhunter13/iso8601/v2"
 	"github.com/gojek/heimdall/v7/hystrix"
@@ -297,7 +298,7 @@ func Test_client_SendSMSV1(t *testing.T) {
 			s := &client{
 				opt: fields.opt,
 			}
-			gotResp, err := s.SendSMSV1(args.req)
+			gotResp, err := s.SendSMSV1(context.TODO(), args.req)
 			if tt.wantErr {
 				assert.NotNil(t, err)
 			}

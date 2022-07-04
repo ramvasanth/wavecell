@@ -11,6 +11,7 @@ Wavecell API client library in Go.
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -27,7 +28,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	resp, err := c.SendSMSV1(&RequestSendSMS{
+	resp, err := c.SendSMSV1(context.Background(), &RequestSendSMS{
 		Destination: "+62101010101",
 		Text:        "Hello!",
 	})

@@ -2,6 +2,7 @@ package wavecell
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/fairyhunter13/iso8601/v2"
@@ -15,11 +16,21 @@ type Client interface {
 	// SendSMSV1 sends one message to one recipient.
 	// The resp here can be either *ResponseError, *ResponseSendSMS, or nil.
 	// This method is based on the documentation at: https://developer.8x8.com/connect/reference/send-sms-single.
-	SendSMSV1(req *RequestSendSMS) (resp *ResponseSendSMS, err error)
+	SendSMSV1(ctx context.Context, req *RequestSendSMS) (resp *ResponseSendSMS, err error)
 }
 
 type client struct {
 	opt *Option
+}
+
+// Assign assigns the opt to the client.
+func (c *client) Assign(opt *Option) *client {
+	if opt == nil {
+		return c
+	}
+
+	c.opt = opt.Clone()
+	return c
 }
 
 // New returns a new Sender struct.
@@ -30,7 +41,7 @@ func New(opts ...FnOption) (c Client, err error) {
 		return
 	}
 
-	c = &client{opt: o.Clone()}
+	c = (new(client)).Assign(o)
 	return
 }
 
@@ -80,7 +91,7 @@ func (s *client) getFullURL(action string) string {
 
 // SendSMSV1 sends one message to one recipient.
 // The resp here can be either *ResponseError, *ResponseSendSMS, or nil.
-func (s *client) SendSMSV1(req *RequestSendSMS) (resp *ResponseSendSMS, err error) {
+func (s *client) SendSMSV1(ctx context.Context, req *RequestSendSMS) (resp *ResponseSendSMS, err error) {
 	buff, err := s.getReqBuffer(req)
 	if err != nil {
 		return
@@ -93,7 +104,7 @@ func (s *client) SendSMSV1(req *RequestSendSMS) (resp *ResponseSendSMS, err erro
 		return
 	}
 
-	res, err := s.doRequest(r)
+	res, err := s.doRequest(ctx, r)
 	if err != nil {
 		return
 	}
@@ -123,13 +134,14 @@ func (s *client) isResponseError(resp *http.Response) bool {
 	return resp.StatusCode >= http.StatusBadRequest
 }
 
-func (s *client) doRequest(req *http.Request) (resp *http.Response, err error) {
+func (s *client) doRequest(ctx context.Context, req *http.Request) (resp *http.Response, err error) {
 	if s.opt.APIKey != "" {
 		req.Header.Add(fiber.HeaderAuthorization, HeaderAuthBearerValue+s.opt.APIKey)
 	}
+
 	req.Header.Add(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
 	req.Header.Add(fiber.HeaderAccept, fiber.MIMEApplicationJSON)
-
+	req = req.WithContext(ctx)
 	resp, err = s.opt.client.Do(req)
 	return
 }
