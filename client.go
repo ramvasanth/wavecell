@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/fairyhunter13/iso8601/v2"
+	"github.com/fairyhunter13/phone"
 	"github.com/fairyhunter13/pool"
 	"github.com/gofiber/fiber/v2"
 	"net/http"
@@ -75,6 +76,12 @@ type RequestSendSMS struct {
 	Track           string        `json:"track,omitempty"`
 }
 
+// Normalize normalizes the request.
+func (r *RequestSendSMS) Normalize() *RequestSendSMS {
+	r.Destination = phone.NormalizeID(r.Destination, 0)
+	return r
+}
+
 func (s *client) getReqBuffer(req interface{}) (buf *bytes.Buffer, err error) {
 	buf = pool.GetBuffer()
 	err = json.NewEncoder(buf).Encode(req)
@@ -92,7 +99,7 @@ func (s *client) getFullURL(action string) string {
 // SendSMSV1 sends one message to one recipient.
 // The resp here can be either *ResponseError, *ResponseSendSMS, or nil.
 func (s *client) SendSMSV1(ctx context.Context, req *RequestSendSMS) (resp *ResponseSendSMS, err error) {
-	buff, err := s.getReqBuffer(req)
+	buff, err := s.getReqBuffer(req.Normalize())
 	if err != nil {
 		return
 	}
