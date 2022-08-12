@@ -10,5 +10,6 @@ require (
 	github.com/gojek/heimdall/v7 v7.0.2
 	github.com/jarcoal/httpmock v1.2.0
 	github.com/pkg/errors v0.9.1
+	github.com/shopspring/decimal v1.3.1
 	github.com/stretchr/testify v1.7.1
 )
