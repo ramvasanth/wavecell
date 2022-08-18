@@ -41,3 +41,24 @@ type MessagePrice struct {
 	PerSMS   decimal.Decimal  `json:"perSms"`
 	Currency *string          `json:"currency"`
 }
+
+// List of Status Callback
+const (
+	StatusCallbackUnknown     = `unknown`
+	StatusCallbackQueued      = `queued`
+	StatusCallbackFailed      = `failed`
+	StatusCallbackSent        = `sent`
+	StatusCallbackDelivered   = `delivered`
+	StatusCallbackUndelivered = `undelivered`
+	StatusCallbackRead        = `read`
+	StatusCallbackOk          = `ok`
+	StatusCallbackError       = `error`
+)
+
+// List of Detail Callback
+const (
+	DetailCallbackDeliveredToOperator    = `delivered_to_operator`
+	DetailCallbackDeliveredToRecipient   = `delivered_to_recipient`
+	DetailCallbackRejectedByOperator     = `rejected_by_operator`
+	DetailCallbackUndeliveredToRecipient = `undelivered_to_recipient`
+)
