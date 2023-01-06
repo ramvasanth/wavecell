@@ -53,6 +53,7 @@ const (
 	StatusCallbackRead        = `read`
 	StatusCallbackOk          = `ok`
 	StatusCallbackError       = `error`
+	StatusCallbackRejected    = `rejected`
 )
 
 // List of Detail Callback
